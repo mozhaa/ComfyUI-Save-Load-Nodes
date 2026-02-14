@@ -116,7 +116,7 @@ class LoadImagesFromFolder:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     FUNCTION = "load_images"
     CATEGORY = "image"
 
@@ -138,6 +138,7 @@ class LoadImagesFromFolder:
 
         images = []
         masks = []
+        prompts = []
         for img_file in image_files:
             img = Image.open(img_file)
             img_rgb = img.convert("RGB")
@@ -151,6 +152,15 @@ class LoadImagesFromFolder:
                 mask = torch.zeros(img_np.shape[:2], dtype=torch.float32)
             masks.append(mask)
 
+            prompt_text = img.info.get("custom_prompt", "")
+            if prompt_text:
+                try:
+                    prompt_text = json.loads(prompt_text)
+                except:
+                    pass
+            prompts.append(prompt_text)
+
         images_tensor = torch.stack(images, dim=0)
         masks_tensor = torch.stack(masks, dim=0)
-        return (images_tensor, masks_tensor)
+        prompts_json = json.dumps(prompts)
+        return (images_tensor, masks_tensor, prompts_json)
