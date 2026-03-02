@@ -174,5 +174,5 @@ class LoadImageWithPrompt(nodes.LoadImage):
         img_tensor, mask_tensor = super().load_image(image)
         image_path = folder_paths.get_annotated_filepath(image)
         with Image.open(image_path) as pil_img:
-            prompt = json.loads(pil_img.info.get("custom_prompt", ""))
+            prompt = json.loads(pil_img.info.get("custom_prompt", '""'))
         return (img_tensor, mask_tensor, prompt)
