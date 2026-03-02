@@ -164,3 +164,15 @@ class LoadImagesFromFolder:
         masks_tensor = torch.stack(masks, dim=0)
         prompts_json = json.dumps(prompts)
         return (images_tensor, masks_tensor, prompts_json)
+
+
+class LoadImageWithPrompt(nodes.LoadImage):
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    FUNCTION = "load_image"
+
+    def load_image(self, image):
+        img_tensor, mask_tensor = super().load_image(image)
+        image_path = folder_paths.get_annotated_filepath(image)
+        with Image.open(image_path) as pil_img:
+            prompt = pil_img.info.get("custom_prompt", "")
+        return (img_tensor, mask_tensor, prompt)
