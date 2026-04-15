@@ -28,13 +28,33 @@ mapping = {
 pattern = re.compile("|".join(sorted(mapping.keys(), key=len, reverse=True)))
 
 
+def _load_image_from_path(file_path: Path):
+    """Load a single image, return (image_tensor, mask_tensor, positive_prompt, negative_prompt)."""
+    img = Image.open(file_path)
+    # image
+    img_rgb = img.convert("RGB")
+    img_np = np.array(img_rgb).astype(np.float32) / 255.0
+    image_tensor = torch.from_numpy(img_np)[None, ...]
+    # mask
+    if "A" in img.getbands():
+        mask_np = np.array(img.getchannel("A")).astype(np.float32) / 255.0
+        mask_tensor = 1.0 - torch.from_numpy(mask_np)
+    else:
+        mask_tensor = torch.zeros((64, 64), dtype=torch.float32)
+    # prompts
+    pos = img.info.get("positive_prompt", "")
+    neg = img.info.get("negative_prompt", "")
+    return image_tensor, mask_tensor, pos, neg
+
+
 class SaveImageWithPrompt(nodes.SaveImage):
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "images": ("IMAGE",),
-                "prompt_text": ("STRING", {"forceInput": True}),
+                "positive_prompt": ("STRING", {"forceInput": True}),
+                "negative_prompt": ("STRING", {"forceInput": True}),
                 "filename_prefix": ("STRING", {"default": "ComfyUI"}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
@@ -43,7 +63,8 @@ class SaveImageWithPrompt(nodes.SaveImage):
     def save_images(
         self,
         images,
-        prompt_text,
+        positive_prompt,
+        negative_prompt,
         filename_prefix="ComfyUI",
         prompt=None,
         extra_pnginfo=None,
@@ -57,7 +78,8 @@ class SaveImageWithPrompt(nodes.SaveImage):
 
         if extra_pnginfo is None:
             extra_pnginfo = {}
-        extra_pnginfo["custom_prompt"] = prompt_text
+        extra_pnginfo["positive_prompt"] = positive_prompt
+        extra_pnginfo["negative_prompt"] = negative_prompt
 
         return super().save_images(images, filename_prefix, prompt, extra_pnginfo)
 
@@ -79,42 +101,16 @@ class LoadImageFromFolder:
     def load_image(self, path, index):
         folder = Path(folder_paths.base_path) / path
         valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
-        images = sorted(
-            [
-                f
-                for f in folder.iterdir()
-                if f.is_file() and f.suffix.lower() in valid_exts
-            ]
-        )
-        img = Image.open(images[index])
-        prompt_text = img.info.get("custom_prompt", "")
-        if prompt_text:
-            try:
-                prompt_text = json.loads(prompt_text)
-            except:
-                pass
-
-        image = img.convert("RGB")
-        image = np.array(image).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)[None,]
-
-        if "A" in img.getbands():
-            mask = np.array(img.getchannel("A")).astype(np.float32) / 255.0
-            mask = 1.0 - torch.from_numpy(mask)
-        else:
-            mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
-
-        return (image, mask, prompt_text)
+        images = sorted([f for f in folder.iterdir() if f.suffix.lower() in valid_exts])
+        img_tensor, mask_tensor, pos, neg = _load_image_from_path(images[index])
+        prompts_json = json.dumps({"positive": pos, "negative": neg})
+        return (img_tensor, mask_tensor, prompts_json)
 
 
 class LoadImagesFromFolder:
     @classmethod
     def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "path": ("STRING", {"default": "output"}),
-            }
-        }
+        return {"required": {"path": ("STRING", {"default": "output"})}}
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     FUNCTION = "load_images"
@@ -122,45 +118,23 @@ class LoadImagesFromFolder:
 
     def load_images(self, path):
         folder = Path(folder_paths.base_path) / path
-        if not folder.exists() or not folder.is_dir():
+        if not folder.is_dir():
             raise FileNotFoundError(f"Folder not found: {folder}")
-
         valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
         image_files = sorted(
-            [
-                f
-                for f in folder.iterdir()
-                if f.is_file() and f.suffix.lower() in valid_exts
-            ]
+            [f for f in folder.iterdir() if f.suffix.lower() in valid_exts]
         )
         if not image_files:
-            raise ValueError(f"No image files found in {folder}")
+            raise ValueError(f"No image files in {folder}")
 
-        images = []
-        masks = []
-        prompts = []
-        for img_file in image_files:
-            img = Image.open(img_file)
-            img_rgb = img.convert("RGB")
-            img_np = np.array(img_rgb).astype(np.float32) / 255.0
-            images.append(torch.from_numpy(img_np))
+        images, masks, prompts = [], [], []
+        for f in image_files:
+            img_t, mask_t, pos, neg = _load_image_from_path(f)
+            images.append(img_t)
+            masks.append(mask_t)
+            prompts.append({"positive": pos, "negative": neg})
 
-            if "A" in img.getbands():
-                mask_np = np.array(img.getchannel("A")).astype(np.float32) / 255.0
-                mask = 1.0 - torch.from_numpy(mask_np)
-            else:
-                mask = torch.zeros(img_np.shape[:2], dtype=torch.float32)
-            masks.append(mask)
-
-            prompt_text = img.info.get("custom_prompt", "")
-            if prompt_text:
-                try:
-                    prompt_text = json.loads(prompt_text)
-                except:
-                    pass
-            prompts.append(prompt_text)
-
-        images_tensor = torch.stack(images, dim=0)
+        images_tensor = torch.cat(images, dim=0)
         masks_tensor = torch.stack(masks, dim=0)
         prompts_json = json.dumps(prompts)
         return (images_tensor, masks_tensor, prompts_json)
@@ -174,5 +148,7 @@ class LoadImageWithPrompt(nodes.LoadImage):
         img_tensor, mask_tensor = super().load_image(image)
         image_path = folder_paths.get_annotated_filepath(image)
         with Image.open(image_path) as pil_img:
-            prompt = json.loads(pil_img.info.get("custom_prompt", '""'))
-        return (img_tensor, mask_tensor, prompt)
+            pos = pil_img.info.get("positive_prompt", "")
+            neg = pil_img.info.get("negative_prompt", "")
+        prompts_json = json.dumps({"positive": pos, "negative": neg})
+        return (img_tensor, mask_tensor, prompts_json)
