@@ -94,7 +94,7 @@ class LoadImageFromFolder:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "STRING")
     FUNCTION = "load_image"
     CATEGORY = "image"
 
@@ -103,8 +103,7 @@ class LoadImageFromFolder:
         valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
         images = sorted([f for f in folder.iterdir() if f.suffix.lower() in valid_exts])
         img_tensor, mask_tensor, pos, neg = _load_image_from_path(images[index])
-        prompts_json = json.dumps({"positive": pos, "negative": neg})
-        return (img_tensor, mask_tensor, prompts_json)
+        return (img_tensor, mask_tensor, pos, neg)
 
 
 class LoadImagesFromFolder:
@@ -141,7 +140,7 @@ class LoadImagesFromFolder:
 
 
 class LoadImageWithPrompt(nodes.LoadImage):
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "STRING")
     FUNCTION = "load_image"
 
     def load_image(self, image):
@@ -150,5 +149,4 @@ class LoadImageWithPrompt(nodes.LoadImage):
         with Image.open(image_path) as pil_img:
             pos = pil_img.info.get("positive_prompt", "")
             neg = pil_img.info.get("negative_prompt", "")
-        prompts_json = json.dumps({"positive": pos, "negative": neg})
-        return (img_tensor, mask_tensor, prompts_json)
+        return (img_tensor, mask_tensor, pos, neg)
