@@ -42,8 +42,8 @@ def _load_image_from_path(file_path: Path):
     else:
         mask_tensor = torch.zeros((64, 64), dtype=torch.float32)
     # prompts
-    pos = img.info.get("positive_prompt", "")
-    neg = img.info.get("negative_prompt", "")
+    pos = json.loads(img.info.get("positive_prompt", ""))
+    neg = json.loads(img.info.get("negative_prompt", ""))
     return image_tensor, mask_tensor, pos, neg
 
 
