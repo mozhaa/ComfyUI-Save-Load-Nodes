@@ -39,10 +39,17 @@ def _load_image_and_prompts(image_path: Path):
     else:
         mask_tensor = torch.zeros((64, 64), dtype=torch.float32)
 
-    params = img.info.get("parameters", "{}")
-    data = json.loads(params)
-    pos = data.get("positive_prompt", "")
-    neg = data.get("negative_prompt", "")
+    pos_raw = img.info.get("positive_prompt", "")
+    neg_raw = img.info.get("negative_prompt", "")
+    try:
+        pos = json.loads(pos_raw)
+    except:
+        pos = pos_raw
+    try:
+        neg = json.loads(neg_raw)
+    except:
+        neg = neg_raw
+
     return image_tensor, mask_tensor, pos, neg
 
 
