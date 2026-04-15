@@ -24,26 +24,25 @@ mapping = {
     "ss": "%S",
     "s": "%S",
 }
-
 pattern = re.compile("|".join(sorted(mapping.keys(), key=len, reverse=True)))
 
 
-def _load_image_from_path(file_path: Path):
-    """Load a single image, return (image_tensor, mask_tensor, positive_prompt, negative_prompt)."""
-    img = Image.open(file_path)
-    # image
+def _load_image_and_prompts(image_path: Path):
+    img = Image.open(image_path)
     img_rgb = img.convert("RGB")
     img_np = np.array(img_rgb).astype(np.float32) / 255.0
     image_tensor = torch.from_numpy(img_np)[None, ...]
-    # mask
+
     if "A" in img.getbands():
         mask_np = np.array(img.getchannel("A")).astype(np.float32) / 255.0
         mask_tensor = 1.0 - torch.from_numpy(mask_np)
     else:
         mask_tensor = torch.zeros((64, 64), dtype=torch.float32)
-    # prompts
-    pos = json.loads(img.info.get("positive_prompt", ""))
-    neg = json.loads(img.info.get("negative_prompt", ""))
+
+    params = img.info.get("parameters", "{}")
+    data = json.loads(params)
+    pos = data.get("positive_prompt", "")
+    neg = data.get("negative_prompt", "")
     return image_tensor, mask_tensor, pos, neg
 
 
@@ -95,6 +94,7 @@ class LoadImageFromFolder:
         }
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING", "STRING")
+    RETURN_NAMES = ("image", "mask", "positive_prompt", "negative_prompt")
     FUNCTION = "load_image"
     CATEGORY = "image"
 
@@ -102,8 +102,7 @@ class LoadImageFromFolder:
         folder = Path(folder_paths.base_path) / path
         valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
         images = sorted([f for f in folder.iterdir() if f.suffix.lower() in valid_exts])
-        img_tensor, mask_tensor, pos, neg = _load_image_from_path(images[index])
-        return (img_tensor, mask_tensor, pos, neg)
+        return _load_image_and_prompts(images[index])
 
 
 class LoadImagesFromFolder:
@@ -128,7 +127,7 @@ class LoadImagesFromFolder:
 
         images, masks, prompts = [], [], []
         for f in image_files:
-            img_t, mask_t, pos, neg = _load_image_from_path(f)
+            img_t, mask_t, pos, neg = _load_image_and_prompts(f)
             images.append(img_t)
             masks.append(mask_t)
             prompts.append({"positive": pos, "negative": neg})
@@ -141,12 +140,11 @@ class LoadImagesFromFolder:
 
 class LoadImageWithPrompt(nodes.LoadImage):
     RETURN_TYPES = ("IMAGE", "MASK", "STRING", "STRING")
+    RETURN_NAMES = ("image", "mask", "positive_prompt", "negative_prompt")
     FUNCTION = "load_image"
 
     def load_image(self, image):
         img_tensor, mask_tensor = super().load_image(image)
         image_path = folder_paths.get_annotated_filepath(image)
-        with Image.open(image_path) as pil_img:
-            pos = pil_img.info.get("positive_prompt", "")
-            neg = pil_img.info.get("negative_prompt", "")
+        _, _, pos, neg = _load_image_and_prompts(Path(image_path))
         return (img_tensor, mask_tensor, pos, neg)
